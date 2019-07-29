@@ -46,7 +46,7 @@ def mergeImages(number):
     y_offset = 0
     for x in np.arange(number_of_tiles_x):
         x_offset=x*550
-        for y in np.arange(number_of_tiles_y)+start_tile_y:
+        for y in np.arange(number_of_tiles_y):
             y_offset=y*550
             new_im.paste(images[y][x], (x_offset,y_offset))
 
