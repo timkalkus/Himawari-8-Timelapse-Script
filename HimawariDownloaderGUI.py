@@ -11,7 +11,8 @@ import requests
 from multiprocessing import Process
 import multiprocessing
 import glob
-
+#pyinstaller command:
+#pyinstaller --icon=Earth.ico --onefile --add-data="Earth.png;./" --windowed HimawariDownloaderGUI.py
 
 def download_helper(link):
     url, path = link
@@ -30,6 +31,7 @@ class HimawariDownloader():
         self.Result_folder = 'Result-Him8_{0:%Y-%m-%d_%H%M%S}'.format(sessiontime)
         self.Band=0
         self.createFolder(self.Result_folder)
+        self.timestep = 10
 
     def SetBand(self,band):
         self.Band=band
@@ -67,7 +69,7 @@ class HimawariDownloader():
                 #print(img_data.split()[0])
             else:
                 img = Image.open(BytesIO(session.get(self.base_url.format(self.start_date, 1, 0, 0)).content))
-            print(img)
+            # print(img)
             return img
 
     def StartDownload(self, frames, startframe, resolution, from_x=0, number_x=1, from_y=0, number_y=1):
@@ -75,11 +77,11 @@ class HimawariDownloader():
         info_file.write("# This file contains the time information of all images. First column is the image name, the second column is the date and time in the format YYYY-MM-DD-HHMMSS.")
         info_file.close()
         for it in range(startframe - 1, frames):
-            if not self.__download(self.start_date + timedelta(minutes=10 * it), resolution, it + 1, self.Result_folder,
+            if not self.__download(self.start_date + timedelta(minutes=self.timestep * it), resolution, it + 1, self.Result_folder,
                                    from_x, number_x, from_y, number_y):
                 return False
             info_file = open(self.filepath + self.Result_folder+"/ImageInfos.txt", "a+")
-            info_file.write("\n{0}\t{1:%Y-%m-%d-%H%M%S}".format(it + 1,self.start_date + timedelta(minutes=10 * it)))
+            info_file.write("\n{0}\t{1:%Y-%m-%d-%H%M%S}".format(it + 1,self.start_date + timedelta(minutes=self.timestep * it)))
             info_file.close()
 
         return True
@@ -137,6 +139,7 @@ class MyFrame(wx.Frame):
         self.spin_ctrl_Frames = wx.SpinCtrl(self, wx.ID_ANY, "100", min=1, max=9999)
         self.spin_ctrl_StartFrame = wx.SpinCtrl(self, wx.ID_ANY, "1", min=1, max=9999)
         self.button_Download = wx.Button(self, wx.ID_ANY, "Download")
+        self.choice_time_step = wx.Choice(self, wx.ID_ANY, choices=["10m", "30m", "1h", "3h", "6h", "12h", "24h"])
         self.timer = wx.Timer(self)
         self.thumbnail=None
         icon = wx.Icon()
@@ -147,7 +150,7 @@ class MyFrame(wx.Frame):
         icon.CopyFromBitmap(wx.Bitmap(application_path+'/Earth.png', wx.BITMAP_TYPE_ANY))
         self.SetIcon(icon)
 
-        self.allItems=[self.choice_Bands, self.datepicker_ctrl_1, self.choice_Hour, self.choice_Minutes, self.button_UpdateImage, self.choice_Tiles, self.spin_ctrl_Frames, self.spin_ctrl_StartFrame, self.button_Download]
+        self.allItems = [self.choice_time_step, self.choice_Bands, self.datepicker_ctrl_1, self.choice_Hour, self.choice_Minutes, self.button_UpdateImage, self.choice_Tiles, self.spin_ctrl_Frames, self.spin_ctrl_StartFrame, self.button_Download]
         self.HimawariDownloader = HimawariDownloader()
         self.thumbnail = ''
         self.downloading = False
@@ -156,6 +159,7 @@ class MyFrame(wx.Frame):
 
         self.Bind(wx.EVT_TIMER, self.update, self.timer)
 
+        self.Bind(wx.EVT_CHOICE, self.choice_Timestep, self.choice_time_step)
         self.Bind(wx.EVT_CHOICE, self.BandChanged, self.choice_Bands)
         self.Bind(wx.adv.EVT_DATE_CHANGED, self.DateChanged, self.datepicker_ctrl_1)
         self.Bind(wx.EVT_CHOICE, self.HourChanged, self.choice_Hour)
@@ -167,6 +171,7 @@ class MyFrame(wx.Frame):
 
     def __set_properties(self):
         self.SetTitle("frame")
+        self.choice_time_step.SetSelection(0)
         self.choice_Hour.SetSelection(2)
         self.choice_Bands.SetSelection(0)
         self.choice_Minutes.SetSelection(0)
@@ -187,9 +192,12 @@ class MyFrame(wx.Frame):
 
     def __do_layout(self):
         sizer_2 = wx.BoxSizer(wx.VERTICAL)
+        sizer_1 = wx.BoxSizer(wx.HORIZONTAL)#middle sizer
         sizer_5 = wx.BoxSizer(wx.HORIZONTAL)
         sizer_4 = wx.BoxSizer(wx.HORIZONTAL)
         sizer_3 = wx.BoxSizer(wx.HORIZONTAL)
+
+        #fist sizer
         sizer_3.Add(self.datepicker_ctrl_1, 0, wx.ALIGN_CENTER | wx.ALL, 4)
         sizer_3.Add(self.choice_Hour, 0, wx.ALIGN_CENTER_VERTICAL | wx.BOTTOM | wx.LEFT | wx.TOP, 4)
         label_2 = wx.StaticText(self, wx.ID_ANY, ":")
@@ -198,22 +206,31 @@ class MyFrame(wx.Frame):
         sizer_3.Add(self.choice_Bands, 0, wx.ALIGN_CENTER_VERTICAL | wx.BOTTOM | wx.RIGHT | wx.TOP, 4)
         sizer_3.Add(self.button_UpdateImage, 0, wx.ALIGN_CENTER | wx.ALL, 4)
         self.label_2_1 = wx.StaticText(self, wx.ID_ANY, "Output resolution: 0x0")
-        sizer_3.Add(self.label_2_1, 0, wx.ALIGN_CENTER, 0)
-        sizer_2.Add(sizer_3, 1, wx.ALIGN_CENTER_VERTICAL | wx.EXPAND, 0)
-        sizer_4.Add(self.choice_Tiles, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 4)
+        #second sizer
+        sizer_1.Add(self.choice_Tiles, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 4)
+        sizer_1.Add(self.label_2_1, 0, wx.ALIGN_CENTER, 0)
+        #third sizer
+        sizer_4.Add(wx.StaticText(self, wx.ID_ANY, "Timestep:"),0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 4)
+        sizer_4.Add(self.choice_time_step, 0, wx.ALIGN_CENTER | wx.ALL, 4)
         label_3 = wx.StaticText(self, wx.ID_ANY, "Number of Frames:")
         sizer_4.Add(label_3, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 4)
         sizer_4.Add(self.spin_ctrl_Frames, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 4)
         label_4 = wx.StaticText(self, wx.ID_ANY, "Start at Frame:")
         sizer_4.Add(label_4, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 4)
         sizer_4.Add(self.spin_ctrl_StartFrame, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 4)
+
+        sizer_2.Add(sizer_3, 1, wx.ALIGN_CENTER_VERTICAL | wx.EXPAND, 0)
+        sizer_2.Add(sizer_1, 1, wx.ALIGN_CENTER_VERTICAL | wx.EXPAND, 0)
         sizer_2.Add(sizer_4, 1, wx.ALIGN_CENTER_VERTICAL | wx.EXPAND, 0)
+        #forth sizer
         self.empty_box = sizer_2.Add((550, 550), 0, wx.ALIGN_CENTER | wx.ALL, 0)
         sizer_5.Add(self.button_Download, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 4)
         self.loadingBar = wx.Gauge(self, id=wx.ID_ANY, size=(400, 23))
         sizer_5.Add(self.loadingBar, 0, wx.ALIGN_CENTER, 0)  # Ladebalken
         self.label_5 = wx.StaticText(self, wx.ID_ANY, "0.0%")
         sizer_5.Add(self.label_5, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALIGN_RIGHT | wx.ALL, 4)
+
+
         sizer_2.Add(sizer_5, 1, wx.EXPAND, 0)
         self.SetSizer(sizer_2)
         self.Layout()
@@ -238,6 +255,11 @@ class MyFrame(wx.Frame):
         self.ResolutionChanged(None)
         event.Skip()
 
+    def choice_Timestep(self, event):
+        #["10m", "30m", "1h", "3h", "6h", "12h", "24h"]
+        possible_choices=[10, 30, 60, 180, 360, 720, 1440]
+        self.HimawariDownloader.timestep = possible_choices[self.choice_time_step.GetSelection()]
+
     def DateChanged(self, event):  # wxGlade: MyFrame.<event_handler>
         # print("Event handler 'DateChanged' not implemented!")
         event.Skip()
@@ -255,7 +277,7 @@ class MyFrame(wx.Frame):
             return
         self.setStartDate()
         self.thumbnail=self.HimawariDownloader.LoadThumbnail()
-        print(self.thumbnail)
+        # print(self.thumbnail)
         if not self.thumbnail is None:
             self.drawRectangle()
 
