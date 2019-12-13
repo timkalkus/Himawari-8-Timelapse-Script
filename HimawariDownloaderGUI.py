@@ -49,42 +49,32 @@ class HimawariDownloader():
 
     def LoadThumbnail(self):
         with requests.Session() as session:
-            #print(self.band_url.format(self.start_date, 1, 0, 0, self.Band))
-            #im=BytesIO(session.get(self.band_url.format(self.start_date, 1, 0, 0, self.Band)).content)
-            #print(im)
-
-
 
             if self.Band:
                 img = Image.new('RGBA', (550, 550), (0, 0, 0, 0))
-                # text_img.paste(bg, (0, 0))
-                # Image.frombytes('LA', (550,550), data
                 img = Image.open(
                     BytesIO(session.get(self.band_url.format(self.start_date, 1, 0, 0, self.Band)).content))
-                #img_data.show()
-                #print(img_data)
-                #img_data.draft("L", (550, 550))
-                #print(img_data)
-                #img.paste(img_data.split()[0], (0, 0), mask=img_data.split()[1])
-                #print(img_data.split()[0])
             else:
                 img = Image.open(BytesIO(session.get(self.base_url.format(self.start_date, 1, 0, 0)).content))
-            # print(img)
             return img
 
-    def StartDownload(self, frames, startframe, resolution, from_x=0, number_x=1, from_y=0, number_y=1):
+    def StartDownload(self,result_queue, frames, startframe, resolution, from_x=0, number_x=1, from_y=0, number_y=1):
         info_file = open(self.filepath + self.Result_folder+"/ImageInfos.txt", "a+")
         info_file.write("# This file contains the time information of all images. First column is the image name, the second column is the date and time in the format YYYY-MM-DD-HHMMSS.")
         info_file.close()
+        skipped_frames=[]
         for it in range(startframe - 1, frames):
-            if not self.__download(self.start_date + timedelta(minutes=self.timestep * it), resolution, it + 1, self.Result_folder,
-                                   from_x, number_x, from_y, number_y):
-                return False
-            info_file = open(self.filepath + self.Result_folder+"/ImageInfos.txt", "a+")
-            info_file.write("\n{0}\t{1:%Y-%m-%d-%H%M%S}".format(it + 1,self.start_date + timedelta(minutes=self.timestep * it)))
-            info_file.close()
-
-        return True
+            try:
+                self.__download(self.start_date + timedelta(minutes=self.timestep * it), resolution, it + 1, self.Result_folder,
+                                   from_x, number_x, from_y, number_y)
+                info_file = open(self.filepath + self.Result_folder+"/ImageInfos.txt", "a+")
+                info_file.write("\n{0}\t{1:%Y-%m-%d-%H%M%S}".format(it + 1,self.start_date + timedelta(minutes=self.timestep * it)))
+                info_file.close()
+            except:
+                print('Error while downloading Frame #',it,', continuing with next frame.')
+                skipped_frames.append(it)
+        result_queue.put(skipped_frames)
+        #return skipped_frames
 
     def __download(self, time, resolution, name, destination, from_x=0, number_x=1, from_y=0, number_y=1):
         tiles_x = np.arange(number_x) + from_x
@@ -100,7 +90,6 @@ class HimawariDownloader():
                      for x in tiles_x] for y in tiles_y]
             self.__mergeImages(images, name, destination, tiles_x, tiles_y)
         return True
-
 
     def __mergeImages(self, images, name, destination, tiles_x=np.array([0]), tiles_y=np.array([0])):
         total_width = 550 * tiles_x.size
@@ -136,8 +125,8 @@ class MyFrame(wx.Frame):
                                                                 '07.30µm Mid-IR', '08.60µm Far-IR', '09.60µm Far-IR',
                                                                 '10.40µm Far-IR', '11.20µm Far-IR', '12.40µm Far-IR',
                                                                 '13.30µm Far-IR'])
-        self.spin_ctrl_Frames = wx.SpinCtrl(self, wx.ID_ANY, "100", min=1, max=9999)
-        self.spin_ctrl_StartFrame = wx.SpinCtrl(self, wx.ID_ANY, "1", min=1, max=9999)
+        self.spin_ctrl_Frames = wx.SpinCtrl(self, wx.ID_ANY, "100", min=1, max=999999)
+        self.spin_ctrl_StartFrame = wx.SpinCtrl(self, wx.ID_ANY, "1", min=1, max=999999)
         self.button_Download = wx.Button(self, wx.ID_ANY, "Download")
         self.choice_time_step = wx.Choice(self, wx.ID_ANY, choices=["10m", "30m", "1h", "3h", "6h", "12h", "24h"])
         self.timer = wx.Timer(self)
@@ -297,12 +286,16 @@ class MyFrame(wx.Frame):
             item.Disable()
         self.downloading = True
         tile_x1, tile_y1, tile_x2, tile_y2 = self.GetTiles()
+
+        self.result_queue = multiprocessing.Queue()
+
         self.p = Process(target=self.HimawariDownloader.StartDownload,
-                         args=(self.spin_ctrl_Frames.GetValue(), self.spin_ctrl_StartFrame.GetValue(), self.tile_number,
+                         args=(self.result_queue, self.spin_ctrl_Frames.GetValue(), self.spin_ctrl_StartFrame.GetValue(), self.tile_number,
                                tile_x1, tile_x2 - tile_x1 + 1, tile_y1, tile_y2 - tile_y1 + 1), )
         self.p.daemon=True
         self.p.start()
         self.timer.Start(1000)
+
 
     def BoundariesTiles(self, tile_number):
         return np.max([0, np.min([self.tile_number - 1, tile_number])])
@@ -383,12 +376,20 @@ class MyFrame(wx.Frame):
 
     def update(self, event):
         self.updateProgressBar()
+        if not self.p.is_alive():
+            self.p.join()
+            self.timer.Stop()
+            msg = wx.MessageDialog(self, 'Your download has finished.\n{:} frames where skipped.'.format(len(self.result_queue.get())),'Download finished',wx.OK | wx.ICON_INFORMATION)
+            msg.ShowModal()
+            msg.Destroy()
+            self.Close()
+
 
     def updateProgressBar(self):
         self.loadingBar.SetRange(self.spin_ctrl_Frames.GetValue())
-        #self.loadingBar.SetValue(len(os.listdir(self.HimawariDownloader.resultFolder())))
-        self.loadingBar.SetValue(len(glob.glob(self.HimawariDownloader.resultFolder()+'/*.png')))
-        self.label_5.SetLabel('{0:.1f}%'.format(100 * len(glob.glob(self.HimawariDownloader.resultFolder()+'/*.png')) / self.spin_ctrl_Frames.GetValue()))
+        finished_frames=len(glob.glob(self.HimawariDownloader.resultFolder() + '/*.png'))
+        self.loadingBar.SetValue(finished_frames)
+        self.label_5.SetLabel('{0:.1f}%'.format(100 * finished_frames / self.spin_ctrl_Frames.GetValue()))
 
 
 # end of class MainFraim
