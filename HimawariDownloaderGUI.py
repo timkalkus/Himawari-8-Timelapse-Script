@@ -12,7 +12,7 @@ from multiprocessing import Process
 import multiprocessing
 import glob
 #pyinstaller command:
-#pyinstaller --icon=Earth.ico --onefile --add-data="Earth.png;./" --windowed HimawariDownloaderGUI.py
+#pyinstaller --icon=Earth.ico --onefile --add-data="Earth.png;./" --windowed --distpath="./" HimawariDownloaderGUI.py
 
 def download_helper(link):
     url, path = link
