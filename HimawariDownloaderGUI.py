@@ -1,7 +1,6 @@
 import wx
 import wx.adv
 import numpy as np
-import wget
 from datetime import timedelta, datetime
 from PIL import Image
 from io import BytesIO
@@ -11,14 +10,9 @@ import requests
 from multiprocessing import Process
 import multiprocessing
 import glob
+
 #pyinstaller command:
 #pyinstaller --icon=Earth.ico --onefile --add-data="Earth.png;./" --windowed --distpath="./" HimawariDownloaderGUI.py
-
-def download_helper(link):
-    url, path = link
-    print('link', link, 'url', url, 'path', path)
-    filename = wget.download(url, path)
-
 
 class HimawariDownloader():
     def __init__(self):
