@@ -57,20 +57,16 @@ class HimawariDownloader():
 
     def StartDownloadMultithread(self, progress, frames, startframe, resolution, from_x=0, number_x=1, from_y=0, number_y=1, threads=16):
         self.start_time = time.time()
-
         info_file = open(self.filepath + self.Result_folder + "/ImageInfos.txt", "a+")
         info_file.write(
             "# This file contains the time information of all images. First column is the image name, the second column is the date and time in the format YYYY-MM-DD-HHMMSS.")
         info_file.close()
-        #result_queue = multiprocessing.Queue()
-        #download_queue = multiprocessing.Queue()
 
         tiles_x = np.arange(number_x) + from_x
         tiles_y = np.arange(number_y) + from_y
         successful_frames = 0
         failed_frames = 0
 
-        #create download threads
         with multiprocessing.Pool(threads) as pool:
             for it in range(startframe - 1, frames):
                 progress.put([successful_frames, failed_frames, frames - startframe + 1])
@@ -81,18 +77,13 @@ class HimawariDownloader():
                             url.append([self.band_url.format(self.start_date + timedelta(minutes=self.timestep * it), resolution, x, y, self.Band),x-from_x,y-from_y])
                         else:
                             url.append([self.base_url.format(self.start_date + timedelta(minutes=self.timestep * it), resolution, x, y), x-from_x, y-from_y])
-                #add images to download queue
                 total_width = 550 * tiles_x.size
                 total_height = 550 * tiles_y.size
                 new_im = Image.new('RGBA', (total_width, total_height))
                 save_image = True
-                print(it, '{:.2f}'.format(self.start_time-time.time()), 'Starting Download')
                 for image_x_y in pool.imap_unordered(self.downloadURL, url):
                     img = image_x_y[0]
-                    #img.save(self.filepath + self.Result_folder + '/{0:04d}.png'.format(np.random.randint(50) + 100))
-                    #print(image_x_y)
                     if img is None:
-                        #print('Image returned none')
                         save_image = False
                         failed_frames = failed_frames+1
                         break
@@ -102,89 +93,29 @@ class HimawariDownloader():
                     y_offset = y * 550
                     new_im.paste(img, (x_offset, y_offset))
                 if save_image:
-                    #print(it, '{:.2f}'.format(self.start_time-time.time()), 'Saving Image')
                     image_save_thread = Thread(target=self.image2file,
-                                         args=(new_im, self.filepath + self.Result_folder + '/{0:04d}.png'.format(it)), )
+                                         args=(new_im, self.filepath + self.Result_folder + '/{0:04d}.png'.format(it+1)), )
                     image_save_thread.daemon = True
                     image_save_thread.start()
-                    #print(it, '{:.2f}'.format(self.start_time-time.time()), 'Writing to file')
                     info_file = open(self.filepath + self.Result_folder + "/ImageInfos.txt", "a+")
                     info_file.write("\n{0}\t{1:%Y-%m-%d-%H%M%S}".format(it + 1, self.start_date + timedelta(
                         minutes=self.timestep * it)))
                     info_file.close()
                     successful_frames = successful_frames+1
-            #stitch result queue to image
-
-            #save image to folder
 
     def downloadURL(self, url_x_y):
         url = url_x_y[0]
         x = url_x_y[1]
         y = url_x_y[2]
-
-        #try:
-        if True:
+        try:
             with requests.Session() as session:
                 img = Image.open(BytesIO(session.get(url).content))
-                #print(url, img)
                 return [img , x, y]
-        #except:
+        except:
             return [None, 0, 0]
 
     def image2file(self,img,file):
         img.save(file)
-        print('{:.2f}'.format(self.start_time-time.time()),file,'saved')
-
-
-
-    def StartDownload(self,result_queue, frames, startframe, resolution, from_x=0, number_x=1, from_y=0, number_y=1):
-        info_file = open(self.filepath + self.Result_folder+"/ImageInfos.txt", "a+")
-        info_file.write("# This file contains the time information of all images. First column is the image name, the second column is the date and time in the format YYYY-MM-DD-HHMMSS.")
-        info_file.close()
-        skipped_frames = []
-        for it in range(startframe - 1, frames):
-            try:
-                self.__download(self.start_date + timedelta(minutes=self.timestep * it), resolution, it + 1, self.Result_folder,
-                                   from_x, number_x, from_y, number_y)
-                info_file = open(self.filepath + self.Result_folder+"/ImageInfos.txt", "a+")
-                info_file.write("\n{0}\t{1:%Y-%m-%d-%H%M%S}".format(it + 1,self.start_date + timedelta(minutes=self.timestep * it)))
-                info_file.close()
-            except:
-                print('Error while downloading Frame #',it,', continuing with next frame.')
-                skipped_frames.append(it)
-        result_queue.put(skipped_frames)
-        #return skipped_frames
-
-    def __download(self, time, resolution, name, destination, from_x=0, number_x=1, from_y=0, number_y=1):
-        tiles_x = np.arange(number_x) + from_x
-        tiles_y = np.arange(number_y) + from_y
-        with requests.Session() as session:
-            if self.Band:
-                images = [
-                    [Image.open(BytesIO(session.get(self.band_url.format(time, resolution, x, y, self.Band)).content))
-                     for x in tiles_x] for y in tiles_y]
-            else:
-                images = [
-                    [Image.open(BytesIO(session.get(self.base_url.format(time, resolution, x, y)).content))
-                     for x in tiles_x] for y in tiles_y]
-            self.__mergeImages(images, name, destination, tiles_x, tiles_y)
-        return True
-
-    def __mergeImages(self, images, name, destination, tiles_x=np.array([0]), tiles_y=np.array([0])):
-        total_width = 550 * tiles_x.size
-        max_height = 550 * tiles_y.size
-
-        new_im = Image.new('RGBA', (total_width, max_height))
-        for x in np.arange(tiles_x.size):
-            x_offset = x * 550
-            for y in np.arange(tiles_y.size):
-                y_offset = y * 550
-                new_im.paste(images[y][x], (x_offset, y_offset))
-        if isinstance(name, int):
-            new_im.save(self.filepath + destination + '/{0:04d}.png'.format(name))
-        else:
-            new_im.save(self.filepath + destination + '/{0}.png'.format(name))
-
 
 class MyFrame(wx.Frame):
     def __init__(self, *args, **kwds):
