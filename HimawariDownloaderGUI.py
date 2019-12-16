@@ -7,13 +7,10 @@ from io import BytesIO
 import sys
 import os
 import requests
-#from multiprocessing import Process
 from threading import Thread
 import multiprocessing
 import time
 import hashlib
-
-import glob
 
 #pyinstaller command:
 #pyinstaller --icon=Earth.ico --onefile --add-data="Earth.png;./" --windowed --distpath="./" HimawariDownloaderGUI.py
@@ -303,12 +300,8 @@ class MyFrame(wx.Frame):
             item.Disable()
         self.downloading = True
         tile_x1, tile_y1, tile_x2, tile_y2 = self.GetTiles()
-
+        self.SetStartDate()
         self.result_progress = multiprocessing.Queue()
-        # StartDownloadMultithread(self, progress, frames, startframe, resolution, from_x=0, number_x=1, from_y=0, number_y=1, threads=4)
-        #self.p = Process(target=self.HimawariDownloader.StartDownload,
-        #                 args=(self.result_queue, self.spin_ctrl_Frames.GetValue(), self.spin_ctrl_StartFrame.GetValue(), self.tile_number,
-        #                       tile_x1, tile_x2 - tile_x1 + 1, tile_y1, tile_y2 - tile_y1 + 1), )
         self.thread = Thread(target=self.HimawariDownloader.StartDownloadMultithread,
                          args=(self.result_progress, self.spin_ctrl_Frames.GetValue(), self.spin_ctrl_StartFrame.GetValue(), self.tile_number,
                                tile_x1, tile_x2 - tile_x1 + 1, tile_y1, tile_y2 - tile_y1 + 1),)
@@ -342,12 +335,7 @@ class MyFrame(wx.Frame):
         image.SetData(self.thumbnail.convert("RGB").tobytes())
         image.SetAlpha(self.thumbnail.convert("RGBA").tobytes()[3::4])
 
-        ## use the wx.Image or convert it to wx.Bitmap
-        #bitmap = wx.BitmapFromImage(image)
-
-        #bitmap=self.thumbnail.
         dc = wx.MemoryDC(wx.Bitmap(550,550))
-        #    image.ConvertToBitmap())#wx.Bitmap(bitmap,550, 550, 8))
         dc.DrawBitmap(image.ConvertToBitmap(),0,0)
         dc.SetPen(wx.Pen('#f00000', 1, wx.SOLID))
         dc.SetBrush(wx.Brush("black", wx.TRANSPARENT))
@@ -388,8 +376,6 @@ class MyFrame(wx.Frame):
     def OnClose(self, event):
         if not len(os.listdir(self.HimawariDownloader.resultFolder())):
             os.rmdir(self.HimawariDownloader.resultFolder())
-
-        #self.thread.join()
         event.Skip()
 
     def OnResize(self,event):
@@ -397,7 +383,6 @@ class MyFrame(wx.Frame):
         event.Skip()
 
     def update(self, event):
-        #self.updateProgressBar()
         while not self.result_progress.empty():
             progress = self.result_progress.get()
             finished_frames = progress[0]
@@ -415,14 +400,6 @@ class MyFrame(wx.Frame):
             msg.Destroy()
             self.Close()
 
-
-    #def updateProgressBar(self):
-    #    self.loadingBar.SetRange(self.spin_ctrl_Frames.GetValue())
-    #    finished_frames=len(glob.glob(self.HimawariDownloader.resultFolder() + '/*.png'))
-    #    self.loadingBar.SetValue(finished_frames)
-    #    self.label_5.SetLabel('{0:.1f}%'.format(100 * finished_frames / self.spin_ctrl_Frames.GetValue()))
-
-
 # end of class MainFraim
 
 class MyApp(wx.App):
@@ -435,7 +412,6 @@ class MyApp(wx.App):
         self.frame.Show()
 
         return True
-
 
 # end of class MyApp
 
