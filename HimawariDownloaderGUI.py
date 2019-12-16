@@ -8,7 +8,10 @@ import sys
 import os
 import requests
 from multiprocessing import Process
+from threading import Thread
 import multiprocessing
+import time
+
 import glob
 
 #pyinstaller command:
@@ -19,7 +22,7 @@ class HimawariDownloader():
         self.filepath = os.getcwd() + '/'
         self.base_url = 'http://himawari8-dl.nict.go.jp/himawari8/img/D531106/{1}d/550/{0:%Y/%m/%d/%H%M%S}_{2}_{3}.png'
         self.band_url = 'http://himawari8-dl.nict.go.jp/himawari8/img/FULL_24h/B{4:02d}/{1}d/550/{0:%Y/%m/%d/%H%M%S}_{2}_{3}.png'
-        self.temp_thumbnail = 'temp-Him8-thumb'
+        #self.temp_thumbnail = 'temp-Him8-thumb'
         sessiontime=datetime.now()
         self.temp_thumbnail_name = 'thumbnail_{0:%Y-%m-%d_%H%M%S}'.format(sessiontime)
         self.Result_folder = 'Result-Him8_{0:%Y-%m-%d_%H%M%S}'.format(sessiontime)
@@ -52,54 +55,69 @@ class HimawariDownloader():
                 img = Image.open(BytesIO(session.get(self.base_url.format(self.start_date, 1, 0, 0)).content))
             return img
 
-    def StartDownload(self,result_queue, frames, startframe, resolution, from_x=0, number_x=1, from_y=0, number_y=1):
-        info_file = open(self.filepath + self.Result_folder+"/ImageInfos.txt", "a+")
-        info_file.write("# This file contains the time information of all images. First column is the image name, the second column is the date and time in the format YYYY-MM-DD-HHMMSS.")
+    def StartDownloadMultithread(self, progress, frames, startframe, resolution, from_x=0, number_x=1, from_y=0, number_y=1, threads=16):
+        self.start_time = time.time()
+        info_file = open(self.filepath + self.Result_folder + "/ImageInfos.txt", "a+")
+        info_file.write(
+            "# This file contains the time information of all images. First column is the image name, the second column is the date and time in the format YYYY-MM-DD-HHMMSS.")
         info_file.close()
-        skipped_frames=[]
-        for it in range(startframe - 1, frames):
-            try:
-                self.__download(self.start_date + timedelta(minutes=self.timestep * it), resolution, it + 1, self.Result_folder,
-                                   from_x, number_x, from_y, number_y)
-                info_file = open(self.filepath + self.Result_folder+"/ImageInfos.txt", "a+")
-                info_file.write("\n{0}\t{1:%Y-%m-%d-%H%M%S}".format(it + 1,self.start_date + timedelta(minutes=self.timestep * it)))
-                info_file.close()
-            except:
-                print('Error while downloading Frame #',it,', continuing with next frame.')
-                skipped_frames.append(it)
-        result_queue.put(skipped_frames)
-        #return skipped_frames
 
-    def __download(self, time, resolution, name, destination, from_x=0, number_x=1, from_y=0, number_y=1):
         tiles_x = np.arange(number_x) + from_x
         tiles_y = np.arange(number_y) + from_y
-        with requests.Session() as session:
-            if self.Band:
-                images = [
-                    [Image.open(BytesIO(session.get(self.band_url.format(time, resolution, x, y, self.Band)).content))
-                     for x in tiles_x] for y in tiles_y]
-            else:
-                images = [
-                    [Image.open(BytesIO(session.get(self.base_url.format(time, resolution, x, y)).content))
-                     for x in tiles_x] for y in tiles_y]
-            self.__mergeImages(images, name, destination, tiles_x, tiles_y)
-        return True
+        successful_frames = 0
+        failed_frames = 0
 
-    def __mergeImages(self, images, name, destination, tiles_x=np.array([0]), tiles_y=np.array([0])):
-        total_width = 550 * tiles_x.size
-        max_height = 550 * tiles_y.size
+        threads = np.minimum(number_x*number_y, threads)
 
-        new_im = Image.new('RGBA', (total_width, max_height))
-        for x in np.arange(tiles_x.size):
-            x_offset = x * 550
-            for y in np.arange(tiles_y.size):
-                y_offset = y * 550
-                new_im.paste(images[y][x], (x_offset, y_offset))
-        if isinstance(name, int):
-            new_im.save(self.filepath + destination + '/{0:04d}.png'.format(name))
-        else:
-            new_im.save(self.filepath + destination + '/{0}.png'.format(name))
+        with multiprocessing.Pool(threads) as pool:
+            for it in range(startframe - 1, frames):
+                progress.put([successful_frames, failed_frames, frames - startframe + 1])
+                url=[]
+                for x in tiles_x:
+                    for y in tiles_y:
+                        if self.Band:
+                            url.append([self.band_url.format(self.start_date + timedelta(minutes=self.timestep * it), resolution, x, y, self.Band),x-from_x,y-from_y])
+                        else:
+                            url.append([self.base_url.format(self.start_date + timedelta(minutes=self.timestep * it), resolution, x, y), x-from_x, y-from_y])
+                total_width = 550 * tiles_x.size
+                total_height = 550 * tiles_y.size
+                new_im = Image.new('RGBA', (total_width, total_height))
+                save_image = True
+                for image_x_y in pool.imap_unordered(self.downloadURL, url):
+                    img = image_x_y[0]
+                    if img is None:
+                        save_image = False
+                        failed_frames = failed_frames+1
+                        break
+                    x = image_x_y[1]
+                    y = image_x_y[2]
+                    x_offset = x * 550
+                    y_offset = y * 550
+                    new_im.paste(img, (x_offset, y_offset))
+                if save_image:
+                    image_save_thread = Thread(target=self.image2file,
+                                         args=(new_im, self.filepath + self.Result_folder + '/{0:04d}.png'.format(it+1)), )
+                    image_save_thread.daemon = True
+                    image_save_thread.start()
+                    info_file = open(self.filepath + self.Result_folder + "/ImageInfos.txt", "a+")
+                    info_file.write("\n{0}\t{1:%Y-%m-%d-%H%M%S}".format(it + 1, self.start_date + timedelta(
+                        minutes=self.timestep * it)))
+                    info_file.close()
+                    successful_frames = successful_frames+1
 
+    def downloadURL(self, url_x_y):
+        url = url_x_y[0]
+        x = url_x_y[1]
+        y = url_x_y[2]
+        try:
+            with requests.Session() as session:
+                img = Image.open(BytesIO(session.get(url).content))
+                return [img , x, y]
+        except:
+            return [None, 0, 0]
+
+    def image2file(self,img,file):
+        img.save(file)
 
 class MyFrame(wx.Frame):
     def __init__(self, *args, **kwds):
@@ -281,14 +299,17 @@ class MyFrame(wx.Frame):
         self.downloading = True
         tile_x1, tile_y1, tile_x2, tile_y2 = self.GetTiles()
 
-        self.result_queue = multiprocessing.Queue()
-
-        self.p = Process(target=self.HimawariDownloader.StartDownload,
-                         args=(self.result_queue, self.spin_ctrl_Frames.GetValue(), self.spin_ctrl_StartFrame.GetValue(), self.tile_number,
-                               tile_x1, tile_x2 - tile_x1 + 1, tile_y1, tile_y2 - tile_y1 + 1), )
-        self.p.daemon=True
-        self.p.start()
-        self.timer.Start(1000)
+        self.result_progress = multiprocessing.Queue()
+        # StartDownloadMultithread(self, progress, frames, startframe, resolution, from_x=0, number_x=1, from_y=0, number_y=1, threads=4)
+        #self.p = Process(target=self.HimawariDownloader.StartDownload,
+        #                 args=(self.result_queue, self.spin_ctrl_Frames.GetValue(), self.spin_ctrl_StartFrame.GetValue(), self.tile_number,
+        #                       tile_x1, tile_x2 - tile_x1 + 1, tile_y1, tile_y2 - tile_y1 + 1), )
+        self.thread = Thread(target=self.HimawariDownloader.StartDownloadMultithread,
+                         args=(self.result_progress, self.spin_ctrl_Frames.GetValue(), self.spin_ctrl_StartFrame.GetValue(), self.tile_number,
+                               tile_x1, tile_x2 - tile_x1 + 1, tile_y1, tile_y2 - tile_y1 + 1),)
+        self.thread.daemon=True
+        self.thread.start()
+        self.timer.Start(100)
 
 
     def BoundariesTiles(self, tile_number):
@@ -362,6 +383,8 @@ class MyFrame(wx.Frame):
     def OnClose(self, event):
         if not len(os.listdir(self.HimawariDownloader.resultFolder())):
             os.rmdir(self.HimawariDownloader.resultFolder())
+
+        #self.thread.join()
         event.Skip()
 
     def OnResize(self,event):
@@ -369,21 +392,30 @@ class MyFrame(wx.Frame):
         event.Skip()
 
     def update(self, event):
-        self.updateProgressBar()
-        if not self.p.is_alive():
-            self.p.join()
+        #self.updateProgressBar()
+        while not self.result_progress.empty():
+            progress = self.result_progress.get()
+            finished_frames = progress[0]
+            self.failed_frames = progress[1]
+            total_frames = progress[2]
+            self.loadingBar.SetRange(total_frames)
+            self.loadingBar.SetValue(finished_frames+self.failed_frames)
+            self.label_5.SetLabel('{0:.1f}%   {1}|{2}|{3}'.format(100 * (finished_frames+self.failed_frames) / total_frames,finished_frames,self.failed_frames,total_frames))
+
+        if not self.thread.is_alive():
+            self.thread.join()
             self.timer.Stop()
-            msg = wx.MessageDialog(self, 'Your download has finished.\n{:} frames where skipped.'.format(len(self.result_queue.get())),'Download finished',wx.OK | wx.ICON_INFORMATION)
+            msg = wx.MessageDialog(self, 'Your download has finished.\n{:} frames where skipped.'.format(self.failed_frames),'Download finished',wx.OK | wx.ICON_INFORMATION)
             msg.ShowModal()
             msg.Destroy()
             self.Close()
 
 
-    def updateProgressBar(self):
-        self.loadingBar.SetRange(self.spin_ctrl_Frames.GetValue())
-        finished_frames=len(glob.glob(self.HimawariDownloader.resultFolder() + '/*.png'))
-        self.loadingBar.SetValue(finished_frames)
-        self.label_5.SetLabel('{0:.1f}%'.format(100 * finished_frames / self.spin_ctrl_Frames.GetValue()))
+    #def updateProgressBar(self):
+    #    self.loadingBar.SetRange(self.spin_ctrl_Frames.GetValue())
+    #    finished_frames=len(glob.glob(self.HimawariDownloader.resultFolder() + '/*.png'))
+    #    self.loadingBar.SetValue(finished_frames)
+    #    self.label_5.SetLabel('{0:.1f}%'.format(100 * finished_frames / self.spin_ctrl_Frames.GetValue()))
 
 
 # end of class MainFraim
