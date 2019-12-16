@@ -81,11 +81,12 @@ class HimawariDownloader():
                 total_height = 550 * tiles_y.size
                 new_im = Image.new('RGBA', (total_width, total_height))
                 save_image = True
+                error = ''
                 for image_x_y in pool.imap_unordered(self.downloadURL, url):
                     img = image_x_y[0]
-                    if img is None:
+                    if isinstance(img,str):
                         save_image = False
-                        failed_frames = failed_frames+1
+                        error = img
                         break
                     x = image_x_y[1]
                     y = image_x_y[2]
@@ -102,21 +103,35 @@ class HimawariDownloader():
                         minutes=self.timestep * it)))
                     info_file.close()
                     successful_frames = successful_frames+1
+                else:
+                    failed_frames = failed_frames + 1
+                    error_file = open(self.filepath + self.Result_folder + "/ErrorReport.txt", "a+")
+                    error_file.write('{0}\t{1}\n'.format(it+1,error))
+                    error_file.close()
 
     def downloadURL(self, url_x_y):
         url = url_x_y[0]
         x = url_x_y[1]
         y = url_x_y[2]
+        class NoImage_Frame(Exception):
+            pass
         try:
             with requests.Session() as session:
                 img_bytes = session.get(url).content
-                md5hash = hashlib.md5(img_bytes)
-                if 'b697574875d3b8eb5dd80e9b2bc9c749' == md5hash.hexdigest():
-                    print('"No Image" File downloaded. Skipping ...')
-                    return [None, 0, 0]
+                md5hash = hashlib.md5(img_bytes).hexdigest()
+                if 'b697574875d3b8eb5dd80e9b2bc9c749' == md5hash:
+                    raise NoImage_Frame('"No Image" frame detected')
+                if '71ca069188e3f1be54b79232a30fa168' == md5hash:
+                    raise requests.exceptions.HTTPError('404 Page not found')
+                    #print('"No Image" File downloaded. Skipping ...')
+                    #return [None, 0, 0]
                 return [Image.open(BytesIO(img_bytes)) , x, y]
-        except:
-            return [None, 0, 0]
+        except Exception as ex:
+            template = "An exception of type {0} occurred: {1}".format(type(ex).__name__, ex)
+            #print(template)
+            #print(img_bytes)
+            #print(md5hash.hexdigest())
+            return [template, 0, 0]
 
     def image2file(self,img,file):
         img.save(file)
@@ -300,7 +315,7 @@ class MyFrame(wx.Frame):
             item.Disable()
         self.downloading = True
         tile_x1, tile_y1, tile_x2, tile_y2 = self.GetTiles()
-        self.SetStartDate()
+        self.setStartDate()
         self.result_progress = multiprocessing.Queue()
         self.thread = Thread(target=self.HimawariDownloader.StartDownloadMultithread,
                          args=(self.result_progress, self.spin_ctrl_Frames.GetValue(), self.spin_ctrl_StartFrame.GetValue(), self.tile_number,
