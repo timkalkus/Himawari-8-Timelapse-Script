@@ -67,6 +67,8 @@ class HimawariDownloader():
         successful_frames = 0
         failed_frames = 0
 
+        threads = np.minimum(number_x*number_y, threads)
+
         with multiprocessing.Pool(threads) as pool:
             for it in range(startframe - 1, frames):
                 progress.put([successful_frames, failed_frames, frames - startframe + 1])
