@@ -7,10 +7,11 @@ from io import BytesIO
 import sys
 import os
 import requests
-from multiprocessing import Process
+#from multiprocessing import Process
 from threading import Thread
 import multiprocessing
 import time
+import hashlib
 
 import glob
 
@@ -67,9 +68,9 @@ class HimawariDownloader():
         successful_frames = 0
         failed_frames = 0
 
-        threads = np.minimum(number_x*number_y, threads)
+        threads_min = np.minimum(number_x*number_y, threads)
 
-        with multiprocessing.Pool(threads) as pool:
+        with multiprocessing.Pool(threads_min) as pool:
             for it in range(startframe - 1, frames):
                 progress.put([successful_frames, failed_frames, frames - startframe + 1])
                 url=[]
@@ -111,8 +112,12 @@ class HimawariDownloader():
         y = url_x_y[2]
         try:
             with requests.Session() as session:
-                img = Image.open(BytesIO(session.get(url).content))
-                return [img , x, y]
+                img_bytes = session.get(url).content
+                md5hash = hashlib.md5(img_bytes)
+                if 'b697574875d3b8eb5dd80e9b2bc9c749' == md5hash.hexdigest():
+                    print('"No Image" File downloaded. Skipping ...')
+                    return [None, 0, 0]
+                return [Image.open(BytesIO(img_bytes)) , x, y]
         except:
             return [None, 0, 0]
 
