@@ -9,6 +9,7 @@ import os
 import requests
 from threading import Thread
 import multiprocessing
+from multiprocessing.pool import ThreadPool
 import time
 import hashlib
 
@@ -67,16 +68,22 @@ class HimawariDownloader():
 
         threads_min = np.minimum(number_x*number_y, threads)
 
-        with multiprocessing.Pool(threads_min) as pool:
+        class Custom_Exeption(Exception):
+            pass
+
+        #with multiprocessing.Pool(threads_min) as pool:
+        with ThreadPool(threads_min) as pool:
             for it in range(startframe - 1, frames):
                 progress.put([successful_frames, failed_frames, frames - startframe + 1])
                 url=[]
                 for x in tiles_x:
                     for y in tiles_y:
                         if self.Band:
-                            url.append([self.band_url.format(self.start_date + timedelta(minutes=self.timestep * it), resolution, x, y, self.Band),x-from_x,y-from_y])
+                            url.append([self.band_url.format(self.start_date + timedelta(minutes=self.timestep * it),
+                                                             resolution, x, y, self.Band), x-from_x, y-from_y])
                         else:
-                            url.append([self.base_url.format(self.start_date + timedelta(minutes=self.timestep * it), resolution, x, y), x-from_x, y-from_y])
+                            url.append([self.base_url.format(self.start_date + timedelta(minutes=self.timestep * it),
+                                                             resolution, x, y), x-from_x, y-from_y])
                 total_width = 550 * tiles_x.size
                 total_height = 550 * tiles_y.size
                 new_im = Image.new('RGBA', (total_width, total_height))
@@ -84,10 +91,12 @@ class HimawariDownloader():
                 error = ''
                 try:
                     for image_x_y in pool.imap_unordered(self.downloadURL, url):
+                        #if isinstance(image_x_y, Exception):
+                        #    raise image_x_y
                         img = image_x_y[0]
-                        if isinstance(img,str):
+                        if isinstance(img, str):
                             #save_image = False
-                            raise TypeError
+                            raise Custom_Exeption(img)
                         x = image_x_y[1]
                         y = image_x_y[2]
                         x_offset = x * 550
@@ -103,21 +112,29 @@ class HimawariDownloader():
                         minutes=self.timestep * it)))
                     info_file.close()
                     successful_frames = successful_frames+1
+                except Custom_Exeption as custom_ex:
+                    #error = "An exception of type {0} occurred: {1}".format(type(ex).__name__, ex)
+                    failed_frames = failed_frames + 1
+                    error_file = open(self.filepath + self.Result_folder + "/ErrorReport.txt", "a+")
+                    error_file.write('{0}\t{1}\n'.format(it + 1, custom_ex))
+                    error_file.close()
                 except Exception as ex:
                     error = "An exception of type {0} occurred: {1}".format(type(ex).__name__, ex)
                     failed_frames = failed_frames + 1
                     error_file = open(self.filepath + self.Result_folder + "/ErrorReport.txt", "a+")
                     error_file.write('{0}\t{1}\n'.format(it+1,error))
                     error_file.close()
+            progress.put([successful_frames, failed_frames, frames - startframe + 1])
 
     def downloadURL(self, url_x_y):
         url = url_x_y[0]
         x = url_x_y[1]
         y = url_x_y[2]
+
         class NoImage_Frame(Exception):
             pass
-        #try:
-        if True:
+
+        try:
             with requests.Session() as session:
                 img_bytes = session.get(url).content
                 md5hash = hashlib.md5(img_bytes).hexdigest()
@@ -128,13 +145,13 @@ class HimawariDownloader():
                     #print('"No Image" File downloaded. Skipping ...')
                     #return [None, 0, 0]
                 img = Image.open(BytesIO(img_bytes))
-                return [img , x, y]
-        #except Exception as ex:
-        #    template = "An exception of type {0} occurred: {1}".format(type(ex).__name__, ex)
+                return [img, x, y]
+        except Exception as ex:
+            template = "An exception of type {0} occurred: {1}".format(type(ex).__name__, ex)
             #print(template)
             #print(img_bytes)
             #print(md5hash.hexdigest())
-        #    return [template, 0, 0]
+            return [template, 0, 0]
 
     def image2file(self,img,file):
         img.save(file)
@@ -410,7 +427,7 @@ class MyFrame(wx.Frame):
             self.loadingBar.SetValue(finished_frames+self.failed_frames)
             self.label_5.SetLabel('{0:.1f}%   {1}|{2}|{3}'.format(100 * (finished_frames+self.failed_frames) / total_frames,finished_frames,self.failed_frames,total_frames))
 
-        if not self.thread.is_alive():
+        if not self.thread.is_alive() and self.result_progress.empty():
             self.thread.join()
             self.timer.Stop()
             msg = wx.MessageDialog(self, 'Your download has finished.\n{:} frames where skipped.'.format(self.failed_frames),'Download finished',wx.OK | wx.ICON_INFORMATION)
