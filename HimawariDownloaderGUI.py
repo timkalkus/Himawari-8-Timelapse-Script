@@ -82,18 +82,18 @@ class HimawariDownloader():
                 new_im = Image.new('RGBA', (total_width, total_height))
                 save_image = True
                 error = ''
-                for image_x_y in pool.imap_unordered(self.downloadURL, url):
-                    img = image_x_y[0]
-                    if isinstance(img,str):
-                        save_image = False
-                        error = img
-                        break
-                    x = image_x_y[1]
-                    y = image_x_y[2]
-                    x_offset = x * 550
-                    y_offset = y * 550
-                    new_im.paste(img, (x_offset, y_offset))
-                if save_image:
+                try:
+                    for image_x_y in pool.imap_unordered(self.downloadURL, url):
+                        img = image_x_y[0]
+                        if isinstance(img,str):
+                            #save_image = False
+                            raise TypeError
+                        x = image_x_y[1]
+                        y = image_x_y[2]
+                        x_offset = x * 550
+                        y_offset = y * 550
+                        new_im.paste(img, (x_offset, y_offset))
+                    #if save_image:
                     image_save_thread = Thread(target=self.image2file,
                                          args=(new_im, self.filepath + self.Result_folder + '/{0:04d}.png'.format(it+1)), )
                     image_save_thread.daemon = True
@@ -103,7 +103,8 @@ class HimawariDownloader():
                         minutes=self.timestep * it)))
                     info_file.close()
                     successful_frames = successful_frames+1
-                else:
+                except Exception as ex:
+                    error = "An exception of type {0} occurred: {1}".format(type(ex).__name__, ex)
                     failed_frames = failed_frames + 1
                     error_file = open(self.filepath + self.Result_folder + "/ErrorReport.txt", "a+")
                     error_file.write('{0}\t{1}\n'.format(it+1,error))
@@ -115,7 +116,8 @@ class HimawariDownloader():
         y = url_x_y[2]
         class NoImage_Frame(Exception):
             pass
-        try:
+        #try:
+        if True:
             with requests.Session() as session:
                 img_bytes = session.get(url).content
                 md5hash = hashlib.md5(img_bytes).hexdigest()
@@ -125,13 +127,14 @@ class HimawariDownloader():
                     raise requests.exceptions.HTTPError('404 Page not found')
                     #print('"No Image" File downloaded. Skipping ...')
                     #return [None, 0, 0]
-                return [Image.open(BytesIO(img_bytes)) , x, y]
-        except Exception as ex:
-            template = "An exception of type {0} occurred: {1}".format(type(ex).__name__, ex)
+                img = Image.open(BytesIO(img_bytes))
+                return [img , x, y]
+        #except Exception as ex:
+        #    template = "An exception of type {0} occurred: {1}".format(type(ex).__name__, ex)
             #print(template)
             #print(img_bytes)
             #print(md5hash.hexdigest())
-            return [template, 0, 0]
+        #    return [template, 0, 0]
 
     def image2file(self,img,file):
         img.save(file)
