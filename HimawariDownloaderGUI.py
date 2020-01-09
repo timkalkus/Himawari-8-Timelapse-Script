@@ -7,6 +7,7 @@ from io import BytesIO
 import sys
 import os
 import requests
+from requests.adapters import HTTPAdapter
 from threading import Thread
 import multiprocessing
 from multiprocessing.pool import ThreadPool
@@ -28,6 +29,7 @@ class HimawariDownloader():
         self.Band=0
         self.createFolder(self.Result_folder)
         self.timestep = 10
+        self.shoreLine = True
 
     def SetBand(self,band):
         self.Band=band
@@ -73,6 +75,47 @@ class HimawariDownloader():
 
         #with multiprocessing.Pool(threads_min) as pool:
         with ThreadPool(threads_min) as pool:
+            if self.shoreLine:
+                colors = ['00ff00', 'ff0000', 'ffff00']
+                shorelineURL = 'https://himawari8-dl.nict.go.jp/himawari8/img/D531106/{0:}d/550/coastline/{1:}_{2:}_{3:}.png'
+                for color in colors:
+                    url = []
+                    total_width = 550 * tiles_x.size
+                    total_height = 550 * tiles_y.size
+                    new_im = Image.new('RGBA', (total_width, total_height))
+                    for x in tiles_x:
+                        for y in tiles_y:
+                            url.append([shorelineURL.format(resolution, color, x, y), x - from_x, y - from_y])
+                    try:
+                        for image_x_y in pool.imap_unordered(self.downloadURL_slow, url):
+                            img = image_x_y[0]
+                            if isinstance(img, str):
+                                # save_image = False
+                                raise Custom_Exeption(img)
+                            x = image_x_y[1]
+                            y = image_x_y[2]
+                            x_offset = x * 550
+                            y_offset = y * 550
+                            new_im.paste(img, (x_offset, y_offset))
+                        # if save_image:
+                        image_save_thread = Thread(target=self.image2file,
+                                               args=(
+                                                   new_im,
+                                                   self.filepath + self.Result_folder + '/Shoreline_{0:}.png'.format(color)), )
+                        image_save_thread.daemon = True
+                        image_save_thread.start()
+                    except Custom_Exeption as custom_ex:
+                        error_file = open(self.filepath + self.Result_folder + "/ErrorReport.txt", "a+")
+                        error_file.write('shorline_{0}\t{1}\n'.format(color, custom_ex))
+                        error_file.close()
+                    except Exception as ex:
+                        error = "An exception of type {0} occurred: {1}".format(type(ex).__name__, ex)
+                        error_file = open(self.filepath + self.Result_folder + "/ErrorReport.txt", "a+")
+                        error_file.write('shorline_{0}\t{1}\n'.format(color, error))
+                        error_file.close()
+
+
+
             for it in range(startframe - 1, frames):
                 progress.put([successful_frames, failed_frames, frames - startframe + 1])
                 url=[]
@@ -87,8 +130,6 @@ class HimawariDownloader():
                 total_width = 550 * tiles_x.size
                 total_height = 550 * tiles_y.size
                 new_im = Image.new('RGBA', (total_width, total_height))
-                save_image = True
-                error = ''
                 try:
                     for image_x_y in pool.imap_unordered(self.downloadURL, url):
                         #if isinstance(image_x_y, Exception):
@@ -126,6 +167,10 @@ class HimawariDownloader():
                     error_file.close()
             progress.put([successful_frames, failed_frames, frames - startframe + 1])
 
+    def downloadURL_slow(self, url_x_y):
+        time.sleep(np.random.uniform(0, 1)) #spreads out and slows down the different requests
+        return self.downloadURL(url_x_y)
+
     def downloadURL(self, url_x_y):
         url = url_x_y[0]
         x = url_x_y[1]
@@ -136,6 +181,10 @@ class HimawariDownloader():
 
         try:
             with requests.Session() as session:
+                retry = requests.packages.urllib3.util.retry.Retry(total=5, connect=5, backoff_factor=0.5)
+                adapter = HTTPAdapter(max_retries=retry)
+                session.mount('http://', adapter)
+                session.mount('https://', adapter)
                 img_bytes = session.get(url).content
                 md5hash = hashlib.md5(img_bytes).hexdigest()
                 if 'b697574875d3b8eb5dd80e9b2bc9c749' == md5hash:
@@ -179,7 +228,8 @@ class MyFrame(wx.Frame):
         self.button_Download = wx.Button(self, wx.ID_ANY, "Download")
         self.choice_time_step = wx.Choice(self, wx.ID_ANY, choices=["10m", "30m", "1h", "3h", "6h", "12h", "24h"])
         self.timer = wx.Timer(self)
-        self.thumbnail=None
+        self.shoreline_checker = wx.CheckBox(self, wx.ID_ANY, label="Shoreline Overlay")
+        self.thumbnail = None
         icon = wx.Icon()
         if getattr(sys, 'frozen', False):
             application_path = sys._MEIPASS
@@ -188,7 +238,7 @@ class MyFrame(wx.Frame):
         icon.CopyFromBitmap(wx.Bitmap(application_path+'/Earth.png', wx.BITMAP_TYPE_ANY))
         self.SetIcon(icon)
 
-        self.allItems = [self.choice_time_step, self.choice_Bands, self.datepicker_ctrl_1, self.choice_Hour, self.choice_Minutes, self.button_UpdateImage, self.choice_Tiles, self.spin_ctrl_Frames, self.spin_ctrl_StartFrame, self.button_Download]
+        self.allItems = [self.shoreline_checker, self.choice_time_step, self.choice_Bands, self.datepicker_ctrl_1, self.choice_Hour, self.choice_Minutes, self.button_UpdateImage, self.choice_Tiles, self.spin_ctrl_Frames, self.spin_ctrl_StartFrame, self.button_Download]
         self.HimawariDownloader = HimawariDownloader()
         self.thumbnail = ''
         self.downloading = False
@@ -227,6 +277,7 @@ class MyFrame(wx.Frame):
         self.Bind(wx.EVT_PAINT, self.OnPaint)
         self.Bind(wx.EVT_SIZE, self.OnResize)
         self.setStartDate()
+        self.shoreline_checker.SetValue(False)
 
     def __do_layout(self):
         sizer_2 = wx.BoxSizer(wx.VERTICAL)
@@ -243,6 +294,7 @@ class MyFrame(wx.Frame):
         sizer_3.Add(self.choice_Minutes, 0, wx.ALIGN_CENTER_VERTICAL | wx.BOTTOM | wx.RIGHT | wx.TOP, 4)
         sizer_3.Add(self.choice_Bands, 0, wx.ALIGN_CENTER_VERTICAL | wx.BOTTOM | wx.RIGHT | wx.TOP, 4)
         sizer_3.Add(self.button_UpdateImage, 0, wx.ALIGN_CENTER | wx.ALL, 4)
+        sizer_3.Add(self.shoreline_checker, 0, wx.ALIGN_CENTER, 0)
         self.label_2_1 = wx.StaticText(self, wx.ID_ANY, "Output resolution: 0x0")
         #second sizer
         sizer_1.Add(self.choice_Tiles, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 4)
@@ -282,6 +334,7 @@ class MyFrame(wx.Frame):
                                              self.choice_Hour.GetSelection(),
                                              self.choice_Minutes.GetSelection() * 10)
         self.HimawariDownloader.SetBand(self.choice_Bands.GetSelection())
+        self.HimawariDownloader.shoreLine = self.shoreline_checker.GetValue()
 
     def BandChanged(self, event):
         self.choice_Tiles.Clear()
