@@ -496,7 +496,7 @@ class MyApp(wx.App):
         self.frame = MyFrame(None, wx.ID_ANY, '')
         self.SetTopWindow(self.frame)
         self.frame.Centre()
-        self.frame.SetTitle('Himawari 8 Downloader - made by G4ME-TIME')
+        self.frame.SetTitle('Himawari 8 Downloader v1.1 - made by G4ME-TIME')
         self.frame.Show()
 
         return True
